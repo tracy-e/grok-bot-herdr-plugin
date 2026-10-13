@@ -1,0 +1,7 @@
+webhook.env
+*.env
+outbox/
+done/
+failed/
+inbox/
+.DS_Store

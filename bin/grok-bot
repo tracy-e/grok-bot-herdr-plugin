@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# grok-bot: bridge between Grok Bot and coding agents in herdr. Must run inside a herdr pane.
+# Task:   $GROK_BOT_HUB/inbox/<id>.task   (hub defaults to ~/ai-hub)
+#   Line 1: agent=<name> kind=<cursor|claude|grok|pi|hermes|muse|...> cwd=<project path>
+#   Rest:   prompt (may be empty: just start the agent)
+# Result: $GROK_BOT_HUB/outbox/<id>.md, then notify the webhook ($GROK_BOT_HUB/webhook.env)
+set -u
+HUB="${GROK_BOT_HUB:-$HOME/ai-hub}"
+[ "${HERDR_ENV:-}" = 1 ] || { echo "grok-bot must be run inside a herdr pane"; exit 1; }
+WS="$HERDR_WORKSPACE_ID"
+mkdir -p "$HUB/inbox" "$HUB/outbox" "$HUB/done" "$HUB/failed"
+# shellcheck disable=SC1091
+[ -f "$HUB/webhook.env" ] && . "$HUB/webhook.env"
+log(){ echo "[$(date '+%H:%M:%S')] $*"; }
+notify(){ # id agent state
+  [ -n "${GROK_WEBHOOK_URL:-}" ] || return 0
+  curl -fsS -m 20 -X POST "$GROK_WEBHOOK_URL" \
+    -H "Content-Type: application/json" \
+    ${GROK_WEBHOOK_KEY:+-H "${GROK_WEBHOOK_HEADER:-Authorization}: ${GROK_WEBHOOK_PREFIX-Bearer }$GROK_WEBHOOK_KEY"} \
+    -d "$(jq -n --arg id "$1" --arg agent "$2" --arg state "$3" --arg file "$HUB/outbox/$1.md" '{source:"grok-bot",id:$id,agent:$agent,state:$state,file:$file}')" >/dev/null \
+    && log "$1: notified Grok Bot" || log "$1: webhook notification failed"
+}
+field(){ sed -n "s/.*$1=\([^ ]*\).*/\1/p" <<<"$2"; }
+agent_exists(){ herdr agent get "$1" >/dev/null 2>&1; }
+
+run_task(){
+  local f="$1" id hdr name kind cwd prompt tab pane out st
+  id=$(basename "$f" .task); mv "$f" "$HUB/inbox/$id.running"; f="$HUB/inbox/$id.running"
+  hdr=$(head -n1 "$f"); prompt=$(tail -n +2 "$f")
+  name=$(field agent "$hdr"); kind=$(field kind "$hdr"); cwd=$(field cwd "$hdr"); cwd="${cwd/#\~/$HOME}"
+  [ -n "$name" ] || { log "$id: missing agent="; mv "$f" "$HUB/failed/$id.task"; notify "$id" "" failed; return; }
+  if ! agent_exists "$name"; then
+    [ -n "$kind" ] || { log "$id: a new agent requires kind="; mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
+    log "$id: starting $name ($kind) in a new tab @ ${cwd:-$HOME}"
+    tab=$(herdr tab create --workspace "$WS" --cwd "${cwd:-$HOME}" --label "$name" --no-focus) || { mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
+    pane=$(jq -r '.result.root_pane.pane_id' <<<"$tab"); sleep 1
+    herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout 120000 >/dev/null \
+      || { log "$id: failed to start agent"; mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
+  fi
+  if [ -n "$prompt" ]; then log "$id: sending prompt to $name"; herdr agent prompt "$name" "$prompt" --wait --timeout 3600000 >/dev/null 2>&1; fi
+  st=$(herdr agent get "$name" 2>/dev/null | jq -r '.result.agent.agent_status // "unknown"')
+  out=$(herdr agent read "$name" --source recent-unwrapped --lines 200 2>&1)
+  printf '# %s\nagent: %s\nstate: %s\n\n```\n%s\n```\n' "$id" "$name" "$st" "$out" > "$HUB/outbox/$id.md"
+  mv "$f" "$HUB/done/$id.task"; log "$id: $st -> outbox/$id.md"; notify "$id" "$name" "$st"
+}
+
+log "grok-bot started, watching $HUB/inbox"
+while true; do
+  for f in "$HUB"/inbox/*.task; do [ -e "$f" ] && run_task "$f" & done
+  sleep 3
+done
