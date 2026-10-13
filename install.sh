@@ -2,7 +2,7 @@
 # Install grok-bot: create hub dirs, link bin/grok-bot into ~/.local/bin, seed webhook.env.
 set -eu
 REPO="$(cd "$(dirname "$0")" && pwd)"
-HUB="${GROK_BOT_HUB:-$HOME/ai-hub}"
+HUB="${GROK_BOT_HUB:-$HOME/.grok-bot}"
 BIN="$HOME/.local/bin"
 mkdir -p "$HUB/inbox" "$HUB/outbox" "$HUB/done" "$HUB/failed" "$BIN"
 TARGET="$BIN/grok-bot"

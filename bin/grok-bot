@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # grok-bot: bridge between Grok Bot and coding agents in herdr. Must run inside a herdr pane.
-# Task:   $GROK_BOT_HUB/inbox/<id>.task   (hub defaults to ~/ai-hub)
+# Task:   $GROK_BOT_HUB/inbox/<id>.task   (hub defaults to ~/.grok-bot)
 #   Line 1: agent=<name> kind=<cursor|claude|grok|pi|hermes|muse|...> cwd=<project path>
 #   Rest:   prompt (may be empty: just start the agent)
 # Result: $GROK_BOT_HUB/outbox/<id>.md, then notify the webhook ($GROK_BOT_HUB/webhook.env)
 set -u
-HUB="${GROK_BOT_HUB:-$HOME/ai-hub}"
+HUB="${GROK_BOT_HUB:-$HOME/.grok-bot}"
 [ "${HERDR_ENV:-}" = 1 ] || { echo "grok-bot must be run inside a herdr pane"; exit 1; }
 WS="$HERDR_WORKSPACE_ID"
 mkdir -p "$HUB/inbox" "$HUB/outbox" "$HUB/done" "$HUB/failed"

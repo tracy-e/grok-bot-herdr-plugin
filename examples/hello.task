@@ -1,2 +1,2 @@
-agent=hello-cursor kind=cursor cwd=~/ai-hub
+agent=hello-cursor kind=cursor cwd=~/.grok-bot
 Reply with exactly: grok-bot test OK.

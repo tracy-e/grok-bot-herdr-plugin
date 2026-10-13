@@ -2,9 +2,9 @@
 
 A small bridge between **Grok Bot** and coding agents running in **[herdr](https://herdr.dev)**.
 
-- Grok Bot drops task files into a hub directory (`~/ai-hub/inbox/`).
+- Grok Bot drops task files into a hub directory (`~/.grok-bot/inbox/`).
 - `grok-bot`, running inside a herdr pane, picks them up, starts the requested agent in a new herdr tab (or reuses an existing one), and sends it the prompt.
-- When the agent finishes, `grok-bot` writes the result to `~/ai-hub/outbox/<id>.md` and wakes Grok Bot through a routine webhook, so Grok Bot can read the result and report back.
+- When the agent finishes, `grok-bot` writes the result to `~/.grok-bot/outbox/<id>.md` and wakes Grok Bot through a routine webhook, so Grok Bot can read the result and report back.
 
 You keep watching every agent live in herdr; Grok Bot handles dispatch and follow-up.
 
@@ -23,14 +23,14 @@ cd grok-bot-herdr-plugin
 ./install.sh
 ```
 
-`install.sh` creates `~/ai-hub/{inbox,outbox,done,failed}`, symlinks `bin/grok-bot` into `~/.local/bin` (backing up any existing file), and copies `webhook.env.example` to `~/ai-hub/webhook.env` only if it does not exist yet.
+`install.sh` creates `~/.grok-bot/{inbox,outbox,done,failed}`, symlinks `bin/grok-bot` into `~/.local/bin` (backing up any existing file), and copies `webhook.env.example` to `~/.grok-bot/webhook.env` only if it does not exist yet.
 
-Set `GROK_BOT_HUB` to use a hub directory other than `~/ai-hub`.
+Set `GROK_BOT_HUB` to use a hub directory other than `~/.grok-bot`.
 
 ## Set up the webhook
 
 1. In Grok Bot, create a routine with a **webhook** trigger (e.g. "herdr agent finished").
-2. Copy its webhook URL and key into `~/ai-hub/webhook.env`:
+2. Copy its webhook URL and key into `~/.grok-bot/webhook.env`:
 
    ```bash
    GROK_WEBHOOK_URL="..."
@@ -45,7 +45,7 @@ Never commit this file. Without a URL, `grok-bot` still works but does not notif
 The webhook receives JSON like:
 
 ```json
-{"source":"grok-bot","id":"hello","agent":"hello-cursor","state":"done","file":"/Users/you/ai-hub/outbox/hello.md"}
+{"source":"grok-bot","id":"hello","agent":"hello-cursor","state":"done","file":"/Users/you/.grok-bot/outbox/hello.md"}
 ```
 
 ## Usage
@@ -59,7 +59,7 @@ grok-bot
 It must run inside herdr (`HERDR_ENV=1`); new tabs are created in that pane's workspace. Then drop a task:
 
 ```bash
-cp examples/hello.task ~/ai-hub/inbox/hello.task
+cp examples/hello.task ~/.grok-bot/inbox/hello.task
 ```
 
 Task lifecycle: `inbox/<id>.task` → `inbox/<id>.running` → `done/<id>.task` (or `failed/<id>.task`), with the result in `outbox/<id>.md`.
