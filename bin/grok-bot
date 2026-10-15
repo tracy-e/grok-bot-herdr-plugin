@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# grok-bot: bridge between Grok Bot and coding agents in herdr. Must run inside a herdr pane.
+# grok-bot: bridge between Grok Bot and coding agents in herdr.
+# Runs in the background (started by the herdr plugin) or in a herdr pane. Needs a running herdr server.
 # Task:   $GROK_BOT_HUB/inbox/<id>.task   (hub defaults to ~/.grok-bot)
-#   Line 1: agent=<name> kind=<cursor|claude|grok|pi|hermes|muse|...> cwd=<project path>
+#   Line 1: agent=<name> kind=<cursor|claude|grok|pi|hermes|muse|...> cwd=<project path> [workspace=<id or label>]
 #   Rest:   prompt (may be empty: just start the agent)
 # Result: $GROK_BOT_HUB/outbox/<id>.md, then notify the webhook ($GROK_BOT_HUB/webhook.env)
 set -u
 HUB="${GROK_BOT_HUB:-$HOME/.grok-bot}"
-[ "${HERDR_ENV:-}" = 1 ] || { echo "grok-bot must be run inside a herdr pane"; exit 1; }
-WS="$HERDR_WORKSPACE_ID"
 mkdir -p "$HUB/inbox" "$HUB/outbox" "$HUB/done" "$HUB/failed"
+herdr workspace list >/dev/null 2>&1 || { echo "grok-bot: herdr server is not running"; exit 1; }
+# Single instance via a PID file in the hub.
+PIDFILE="$HUB/bridge.pid"
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  echo "grok-bot already running (pid $(cat "$PIDFILE"))"; exit 0
+fi
+echo $$ > "$PIDFILE"
+cleanup(){ [ "$(cat "$PIDFILE" 2>/dev/null)" = $$ ] && rm -f "$PIDFILE"; kill $(jobs -p) 2>/dev/null; }
+trap cleanup EXIT
+trap 'exit 0' INT TERM HUP
 # Webhook config: herdr plugin config dir first, then the hub.
 CFG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-$(herdr plugin config-dir tracy-e.grok-bot 2>/dev/null || true)}"
 WEBHOOK_ENV=""
@@ -26,9 +35,23 @@ notify(){ # id agent state
 }
 field(){ sed -n "s/.*$1=\([^ ]*\).*/\1/p" <<<"$2"; }
 agent_exists(){ herdr agent get "$1" >/dev/null 2>&1; }
+# Workspace for a new agent tab: the task's workspace= (id or label), then the pane we run in,
+# then the focused workspace, then the first one; create "agents" if none exist.
+pick_ws(){
+  local want="$1" list w
+  list=$(herdr workspace list 2>/dev/null)
+  if [ -n "$want" ]; then
+    w=$(jq -r --arg x "$want" '.result.workspaces[]|select(.workspace_id==$x or .label==$x)|.workspace_id' <<<"$list" | head -1)
+    [ -n "$w" ] && { echo "$w"; return; }
+  fi
+  [ -n "${HERDR_WORKSPACE_ID:-}" ] && { echo "$HERDR_WORKSPACE_ID"; return; }
+  w=$(jq -r '([.result.workspaces[]|select(.focused==true)] + .result.workspaces)[0].workspace_id // empty' <<<"$list")
+  [ -n "$w" ] && { echo "$w"; return; }
+  herdr workspace create --label agents --cwd "$HOME" --no-focus | jq -r '.result.workspace.workspace_id // .result.root_pane.workspace_id'
+}
 
 run_task(){
-  local f="$1" id hdr name kind cwd prompt tab pane out st
+  local f="$1" id hdr name kind cwd prompt tab pane out st ws
   id=$(basename "$f" .task); mv "$f" "$HUB/inbox/$id.running"; f="$HUB/inbox/$id.running"
   hdr=$(head -n1 "$f"); prompt=$(tail -n +2 "$f")
   name=$(field agent "$hdr"); kind=$(field kind "$hdr"); cwd=$(field cwd "$hdr"); cwd="${cwd/#\~/$HOME}"
@@ -36,7 +59,8 @@ run_task(){
   if ! agent_exists "$name"; then
     [ -n "$kind" ] || { log "$id: a new agent requires kind="; mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
     log "$id: starting $name ($kind) in a new tab @ ${cwd:-$HOME}"
-    tab=$(herdr tab create --workspace "$WS" --cwd "${cwd:-$HOME}" --label "$name" --no-focus) || { mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
+    ws=$(pick_ws "$(field workspace "$hdr")")
+    tab=$(herdr tab create --workspace "$ws" --cwd "${cwd:-$HOME}" --label "$name" --no-focus) || { mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
     pane=$(jq -r '.result.root_pane.pane_id' <<<"$tab"); sleep 1
     herdr agent start "$name" --kind "$kind" --pane "$pane" --timeout 120000 >/dev/null \
       || { log "$id: failed to start agent"; mv "$f" "$HUB/failed/$id.task"; notify "$id" "$name" failed; return; }
@@ -84,4 +108,7 @@ if [ "${GROK_BOT_WATCH:-1}" != 0 ]; then watch_agents & log "watching all herdr 
 while true; do
   for f in "$HUB"/inbox/*.task; do [ -e "$f" ] && run_task "$f" & done
   sleep 3
+  # Exit with the herdr server so no orphan bridge is left behind.
+  if herdr workspace list >/dev/null 2>&1; then miss=0; else miss=$((${miss:-0}+1)); fi
+  [ "${miss:-0}" -ge 5 ] && { log "herdr server is gone, exiting"; exit 0; }
 done

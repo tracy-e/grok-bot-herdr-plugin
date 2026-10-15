@@ -3,7 +3,7 @@
 A small bridge between **Grok Bot** and coding agents running in **[herdr](https://herdr.dev)**.
 
 - Grok Bot drops task files into a hub directory (`~/.grok-bot/inbox/`).
-- `grok-bot`, running inside a herdr pane, picks them up, starts the requested agent in a new herdr tab (or reuses an existing one), and sends it the prompt.
+- `grok-bot`, running quietly in the background, picks them up, starts the requested agent in a new herdr tab (or reuses an existing one), and sends it the prompt.
 - When the agent finishes, `grok-bot` writes the result to `~/.grok-bot/outbox/<id>.md` and wakes Grok Bot through a routine webhook, so Grok Bot can read the result and report back.
 
 You keep watching every agent live in herdr; Grok Bot handles dispatch and follow-up.
@@ -21,7 +21,7 @@ You keep watching every agent live in herdr; Grok Bot handles dispatch and follo
 herdr plugin install tracy-e/grok-bot-herdr-plugin
 ```
 
-Every time the herdr server starts, the plugin's startup hook opens a workspace labeled `grok-bot` and runs the bridge in it (skipped if a `grok-bot` bridge is already running). You can also start it by hand with the **Grok Bot: start bridge** action (`herdr plugin action invoke tracy-e.grok-bot.start`).
+Every time the herdr server starts, the plugin's startup hook starts the bridge silently in the background (no tab; skipped if it is already running). Its output goes to `~/.grok-bot/bridge.log` (`tail -f` it to watch), and it exits on its own when the herdr server stops. If no webhook is configured yet, the hook also opens the setup popup. Stop it with the **Grok Bot: stop bridge** action (`herdr plugin action invoke tracy-e.grok-bot.stop`). You can also start it by hand with the **Grok Bot: start bridge** action (`herdr plugin action invoke tracy-e.grok-bot.start`).
 
 The startup hook only runs when the herdr **server** starts. Installing the plugin, or reopening the herdr UI with `herdr` while the server is still running, does not trigger it. Right after installing, run the start action above, or restart the server (`herdr server stop`, then `herdr`; this closes running panes).
 
@@ -34,7 +34,7 @@ cd grok-bot-herdr-plugin
 herdr plugin link "$PWD" # optional: enable auto-start from your checkout
 ```
 
-Set `GROK_BOT_HUB` to use a hub directory other than `~/.grok-bot`, and `GROK_BOT_WORKSPACE_LABEL` to change the auto-start workspace name.
+Set `GROK_BOT_HUB` to use a hub directory other than `~/.grok-bot`.
 
 ## Set up the webhook
 
@@ -76,7 +76,7 @@ With the plugin installed the bridge starts on its own. Otherwise open a pane in
 grok-bot
 ```
 
-It must run inside herdr (`HERDR_ENV=1`); new tabs are created in that pane's workspace. Then drop a task:
+It needs a running herdr server. New agent tabs open in the task's `workspace=` (id or label) if given, else the workspace of the pane it runs in, else the focused workspace. Then drop a task:
 
 ```bash
 cp examples/hello.task ~/.grok-bot/inbox/hello.task

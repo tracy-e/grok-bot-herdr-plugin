@@ -18,4 +18,4 @@ else
   echo "Keeping existing $HUB/webhook.env"
 fi
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "Note: add $BIN to your PATH";; esac
-echo "Done. Run 'grok-bot' inside a herdr pane."
+echo "Done. Run grok-bot (or let the herdr plugin start it)."
