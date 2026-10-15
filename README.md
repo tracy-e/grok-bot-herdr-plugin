@@ -17,30 +17,50 @@ Inspired by [joelhooks/herdr-grok-bot](https://github.com/joelhooks/herdr-grok-b
 
 ## Install
 
+### As a herdr plugin (recommended)
+
+```bash
+herdr plugin install tracy-e/grok-bot-herdr-plugin
+```
+
+Every time the herdr server starts, the plugin's startup hook opens a workspace labeled `grok-bot` and runs the bridge in it (skipped if a `grok-bot` bridge is already running). You can also start it by hand with the **Grok Bot: start bridge** action (`herdr plugin action invoke tracy-e.grok-bot.start`).
+
+### Manual
+
 ```bash
 git clone https://github.com/tracy-e/grok-bot-herdr-plugin.git
 cd grok-bot-herdr-plugin
-./install.sh
+./install.sh             # creates ~/.grok-bot/*, links bin/grok-bot into ~/.local/bin
+herdr plugin link "$PWD" # optional: enable auto-start from your checkout
 ```
 
-`install.sh` creates `~/.grok-bot/{inbox,outbox,done,failed}`, symlinks `bin/grok-bot` into `~/.local/bin` (backing up any existing file), and copies `webhook.env.example` to `~/.grok-bot/webhook.env` only if it does not exist yet.
-
-Set `GROK_BOT_HUB` to use a hub directory other than `~/.grok-bot`.
+Set `GROK_BOT_HUB` to use a hub directory other than `~/.grok-bot`, and `GROK_BOT_WORKSPACE_LABEL` to change the auto-start workspace name.
 
 ## Set up the webhook
 
-1. In Grok Bot, create a routine with a **webhook** trigger (e.g. "herdr agent finished").
-2. Copy its webhook URL and key into `~/.grok-bot/webhook.env`:
+### 1. Get a webhook URL and key from Grok Bot
 
-   ```bash
-   GROK_WEBHOOK_URL="..."
-   GROK_WEBHOOK_KEY="..."
-   # optional, defaults shown
-   # GROK_WEBHOOK_HEADER="Authorization"
-   # GROK_WEBHOOK_PREFIX="Bearer "
-   ```
+Paste this into a chat with your Grok Bot (the configure popup can also copy it for you: press `c`; it lives in `plugin/setup-prompt.txt`):
 
-Never commit this file. Without a URL, `grok-bot` still works but does not notify anyone.
+```text
+Create a webhook-triggered routine named "herdr agent reports". When it fires, the payload is JSON from the grok-bot herdr bridge with fields id, agent, state, and file (a result markdown path on my computer). Read that file on my computer and give me a short summary of what the agent did and whether it finished, failed, or is waiting on me. Never answer an agent's confirmation prompts for me; just tell me. After creating it, give me the routine's Webhook URL and Webhook key links so I can copy them.
+```
+
+Grok Bot creates the routine and replies with links to the routine's **Webhook URL** and **Webhook key**. Open them and copy both values. The key is a secret, so it is shown through the link rather than in the chat.
+
+### 2. Save them
+
+Run the **Grok Bot: configure webhook** action in herdr:
+
+```bash
+herdr plugin action invoke tracy-e.grok-bot.configure
+```
+
+A popup asks for the URL and key (the key is hidden while typing), saves them to `webhook.env` in the plugin config dir (`herdr plugin config-dir tracy-e.grok-bot`, mode 600), and can send a test ping. Restart the bridge afterwards.
+
+Without herdr, run `bash plugin/configure.sh`, or write `~/.grok-bot/webhook.env` yourself (see `webhook.env.example`). `grok-bot` reads the plugin config dir first, then `~/.grok-bot/webhook.env`. Optional `GROK_WEBHOOK_HEADER` (default `Authorization`) and `GROK_WEBHOOK_PREFIX` (default `Bearer `) change how the key is sent.
+
+Never commit `webhook.env`. Without a URL, `grok-bot` still runs and writes results, but does not notify anyone.
 
 The webhook receives JSON like:
 
@@ -50,7 +70,7 @@ The webhook receives JSON like:
 
 ## Usage
 
-Open a pane in herdr and run:
+With the plugin installed the bridge starts on its own. Otherwise open a pane in herdr and run:
 
 ```bash
 grok-bot

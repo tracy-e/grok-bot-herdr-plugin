@@ -9,8 +9,12 @@ HUB="${GROK_BOT_HUB:-$HOME/.grok-bot}"
 [ "${HERDR_ENV:-}" = 1 ] || { echo "grok-bot must be run inside a herdr pane"; exit 1; }
 WS="$HERDR_WORKSPACE_ID"
 mkdir -p "$HUB/inbox" "$HUB/outbox" "$HUB/done" "$HUB/failed"
-# shellcheck disable=SC1091
-[ -f "$HUB/webhook.env" ] && . "$HUB/webhook.env"
+# Webhook config: herdr plugin config dir first, then the hub.
+CFG_DIR="${HERDR_PLUGIN_CONFIG_DIR:-$(herdr plugin config-dir tracy-e.grok-bot 2>/dev/null || true)}"
+WEBHOOK_ENV=""
+for c in "${CFG_DIR:+$CFG_DIR/webhook.env}" "$HUB/webhook.env"; do [ -n "$c" ] && [ -f "$c" ] && { WEBHOOK_ENV="$c"; break; }; done
+# shellcheck disable=SC1090
+[ -n "$WEBHOOK_ENV" ] && . "$WEBHOOK_ENV"
 log(){ echo "[$(date '+%H:%M:%S')] $*"; }
 notify(){ # id agent state
   [ -n "${GROK_WEBHOOK_URL:-}" ] || return 0
@@ -44,7 +48,39 @@ run_task(){
   mv "$f" "$HUB/done/$id.task"; log "$id: $st -> outbox/$id.md"; notify "$id" "$name" "$st"
 }
 
+# Watcher: report state changes of ANY herdr agent (not only ones this bridge started).
+# Fires when an agent leaves "working" (finished, idle, or waiting for input). Disable with GROK_BOT_WATCH=0.
+watch_agents(){
+  local state="$HUB/watch.state" cur line pane st prev title id
+  touch "$state"
+  while true; do
+    cur=$(herdr agent list 2>/dev/null | jq -r '.result.agents[]? | "\(.pane_id)\t\(.agent_status)\t\(.agent)\t\(.terminal_title_stripped // "")"') || { sleep 15; continue; }
+    while IFS=$'\t' read -r pane st agent title; do
+      [ -n "$pane" ] || continue
+      prev=$(awk -F'\t' -v p="$pane" '$1==p{print $2}' "$state")
+      if [ "$prev" = working ] && [ "$st" != working ]; then
+        # Dedupe: agents waiting on a question can flap working<->done; skip if the screen hasn't changed.
+        h=$(herdr pane read "$pane" --lines 40 2>/dev/null | grep -v -E '⠁|⠂|⠄|⡀|⢀|⠠|⠐|⠈|⠰|Running|tokens' | shasum | cut -c1-16)
+        if [ "$h" = "$(cat "$HUB/watch.$pane.last" 2>/dev/null)" ]; then continue; fi
+        # Cooldown: at most one report per pane every ${GROK_BOT_WATCH_COOLDOWN:-600}s (agents re-render while waiting).
+        lt=$(stat -f %m "$HUB/watch.$pane.last" 2>/dev/null || stat -c %Y "$HUB/watch.$pane.last" 2>/dev/null || echo 0)
+        if [ $(( $(date +%s) - lt )) -lt "${GROK_BOT_WATCH_COOLDOWN:-600}" ]; then continue; fi
+        echo "$h" > "$HUB/watch.$pane.last"
+        id="watch-${pane//[:\/]/_}-$(date +%Y%m%d%H%M%S)"
+        { printf '# %s\nagent: %s (%s)\npane: %s\nstate: %s -> %s\n\n```\n' "$id" "$agent" "$title" "$pane" "$prev" "$st"
+          herdr pane read "$pane" --lines 60 2>&1; printf '```\n'; } > "$HUB/outbox/$id.md"
+        log "watch: $title [$pane] $prev -> $st"; notify "$id" "$agent:$title" "$st"
+      fi
+    done <<<"$cur"
+    printf '%s\n' "$cur" > "$state"
+    sleep 15
+  done
+}
+
 log "grok-bot started, watching $HUB/inbox"
+if [ -n "${GROK_WEBHOOK_URL:-}" ]; then log "webhook config: $WEBHOOK_ENV"
+else log "no webhook configured: results are written to outbox but Grok Bot will not be notified."; log "run: herdr plugin action invoke tracy-e.grok-bot.configure  (or bash plugin/configure.sh)"; fi
+if [ "${GROK_BOT_WATCH:-1}" != 0 ]; then watch_agents & log "watching all herdr agents for state changes"; fi
 while true; do
   for f in "$HUB"/inbox/*.task; do [ -e "$f" ] && run_task "$f" & done
   sleep 3

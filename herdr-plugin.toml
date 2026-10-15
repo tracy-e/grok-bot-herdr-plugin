@@ -1,0 +1,30 @@
+id = "tracy-e.grok-bot"
+name = "Grok Bot bridge"
+version = "0.2.0"
+min_herdr_version = "0.9.0"
+description = "Auto-start the grok-bot bridge in herdr and report agent results to Grok Bot via webhook"
+platforms = ["linux", "macos"]
+
+# Runs once when the herdr server starts: opens a "grok-bot" workspace and starts the bridge.
+[[startup]]
+command = ["bash", "plugin/startup.sh"]
+
+[[actions]]
+id = "start"
+title = "Grok Bot: start bridge"
+contexts = ["workspace"]
+command = ["bash", "plugin/startup.sh"]
+
+[[actions]]
+id = "configure"
+title = "Grok Bot: configure webhook"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "tracy-e.grok-bot", "--entrypoint", "configure"]
+
+[[panes]]
+id = "configure"
+title = "Grok Bot webhook setup"
+placement = "popup"
+width = "70%"
+height = 16
+command = ["bash", "plugin/configure.sh"]
