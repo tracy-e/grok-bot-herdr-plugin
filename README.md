@@ -23,6 +23,8 @@ herdr plugin install tracy-e/grok-bot-herdr-plugin
 
 Every time the herdr server starts, the plugin's startup hook opens a workspace labeled `grok-bot` and runs the bridge in it (skipped if a `grok-bot` bridge is already running). You can also start it by hand with the **Grok Bot: start bridge** action (`herdr plugin action invoke tracy-e.grok-bot.start`).
 
+The startup hook only runs when the herdr **server** starts. Installing the plugin, or reopening the herdr UI with `herdr` while the server is still running, does not trigger it. Right after installing, run the start action above, or restart the server (`herdr server stop`, then `herdr`; this closes running panes).
+
 ### Manual
 
 ```bash
