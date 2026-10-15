@@ -16,7 +16,10 @@ mkdir -p "$HUB"/{inbox,outbox,done,failed}
 
 ws=$("$HERDR" workspace list | jq -r --arg l "$LABEL" '.result.workspaces[]|select(.label==$l)|.workspace_id' | head -1)
 if [ -n "$ws" ]; then
-  pane=$("$HERDR" tab create --workspace "$ws" --cwd "$HUB" --label bridge --no-focus | jq -r '.result.root_pane.pane_id')
+  # herdr restores the workspace after a restart, with a plain shell where the
+  # bridge used to run. Reuse that pane instead of opening another tab.
+  pane=$("$HERDR" pane list | jq -r --arg w "$ws" '[.result.panes[]|select(.workspace_id==$w)][0].pane_id // empty')
+  [ -n "$pane" ] || pane=$("$HERDR" tab create --workspace "$ws" --cwd "$HUB" --label bridge --no-focus | jq -r '.result.root_pane.pane_id')
 else
   pane=$("$HERDR" workspace create --label "$LABEL" --cwd "$HUB" --no-focus | jq -r '.result.root_pane.pane_id')
 fi
