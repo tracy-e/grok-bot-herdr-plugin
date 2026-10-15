@@ -8,8 +8,6 @@ A small bridge between **Grok Bot** and coding agents running in **[herdr](https
 
 You keep watching every agent live in herdr; Grok Bot handles dispatch and follow-up.
 
-Inspired by [joelhooks/herdr-grok-bot](https://github.com/joelhooks/herdr-grok-bot).
-
 ## Requirements
 
 - herdr 0.9+ (with the `herdr agent` CLI)
