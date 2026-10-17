@@ -3,12 +3,10 @@
 A small bridge between **Grok Bot** and coding agents running in **[herdr](https://herdr.dev)**.
 
 - Grok Bot drops task files into a hub directory (`~/.grok-bot/inbox/`).
-- `grok-bot`, running inside a herdr pane, picks them up, starts the requested agent in a new herdr tab (or reuses an existing one), and sends it the prompt.
+- `grok-bot`, running quietly in the background, picks them up, starts the requested agent in a new herdr tab (or reuses an existing one), and sends it the prompt.
 - When the agent finishes, `grok-bot` writes the result to `~/.grok-bot/outbox/<id>.md` and wakes Grok Bot through a routine webhook, so Grok Bot can read the result and report back.
 
 You keep watching every agent live in herdr; Grok Bot handles dispatch and follow-up.
-
-Inspired by [joelhooks/herdr-grok-bot](https://github.com/joelhooks/herdr-grok-bot).
 
 ## Requirements
 
@@ -17,30 +15,52 @@ Inspired by [joelhooks/herdr-grok-bot](https://github.com/joelhooks/herdr-grok-b
 
 ## Install
 
+### As a herdr plugin (recommended)
+
+```bash
+herdr plugin install tracy-e/grok-bot-herdr-plugin
+```
+
+Every time the herdr server starts, the plugin's startup hook starts the bridge silently in the background (no tab; skipped if it is already running). Its output goes to `~/.grok-bot/bridge.log` (`tail -f` it to watch), and it exits on its own when the herdr server stops. If no webhook is configured yet, the hook also opens the setup popup. Stop it with the **Grok Bot: stop bridge** action (`herdr plugin action invoke tracy-e.grok-bot.stop`). You can also start it by hand with the **Grok Bot: start bridge** action (`herdr plugin action invoke tracy-e.grok-bot.start`).
+
+The startup hook only runs when the herdr **server** starts. Installing the plugin, or reopening the herdr UI with `herdr` while the server is still running, does not trigger it. Right after installing, run the start action above, or restart the server (`herdr server stop`, then `herdr`; this closes running panes).
+
+### Manual
+
 ```bash
 git clone https://github.com/tracy-e/grok-bot-herdr-plugin.git
 cd grok-bot-herdr-plugin
-./install.sh
+./install.sh             # creates ~/.grok-bot/*, links bin/grok-bot into ~/.local/bin
+herdr plugin link "$PWD" # optional: enable auto-start from your checkout
 ```
-
-`install.sh` creates `~/.grok-bot/{inbox,outbox,done,failed}`, symlinks `bin/grok-bot` into `~/.local/bin` (backing up any existing file), and copies `webhook.env.example` to `~/.grok-bot/webhook.env` only if it does not exist yet.
 
 Set `GROK_BOT_HUB` to use a hub directory other than `~/.grok-bot`.
 
 ## Set up the webhook
 
-1. In Grok Bot, create a routine with a **webhook** trigger (e.g. "herdr agent finished").
-2. Copy its webhook URL and key into `~/.grok-bot/webhook.env`:
+### 1. Get a webhook URL and key from Grok Bot
 
-   ```bash
-   GROK_WEBHOOK_URL="..."
-   GROK_WEBHOOK_KEY="..."
-   # optional, defaults shown
-   # GROK_WEBHOOK_HEADER="Authorization"
-   # GROK_WEBHOOK_PREFIX="Bearer "
-   ```
+Paste this into a chat with your Grok Bot (the configure popup can also copy it for you: press `c`; it lives in `plugin/setup-prompt.txt`):
 
-Never commit this file. Without a URL, `grok-bot` still works but does not notify anyone.
+```text
+Create a webhook-triggered routine named "herdr agent reports". When it fires, the payload is JSON from the grok-bot herdr bridge with fields id, agent, state, and file (a result markdown path on my computer). Read that file on my computer and give me a short summary of what the agent did and whether it finished, failed, or is waiting on me. Never answer an agent's confirmation prompts for me; just tell me. After creating it, give me the routine's Webhook URL and Webhook key links so I can copy them.
+```
+
+Grok Bot creates the routine and replies with links to the routine's **Webhook URL** and **Webhook key**. Open them and copy both values. The key is a secret, so it is shown through the link rather than in the chat.
+
+### 2. Save them
+
+Run the **Grok Bot: configure webhook** action in herdr:
+
+```bash
+herdr plugin action invoke tracy-e.grok-bot.configure
+```
+
+A popup asks for the URL and key (the key is hidden while typing), saves them to `webhook.env` in the plugin config dir (`herdr plugin config-dir tracy-e.grok-bot`, mode 600), and can send a test ping. Restart the bridge afterwards.
+
+Without herdr, run `bash plugin/configure.sh`, or write `~/.grok-bot/webhook.env` yourself (see `webhook.env.example`). `grok-bot` reads the plugin config dir first, then `~/.grok-bot/webhook.env`. Optional `GROK_WEBHOOK_HEADER` (default `Authorization`) and `GROK_WEBHOOK_PREFIX` (default `Bearer `) change how the key is sent.
+
+Never commit `webhook.env`. Without a URL, `grok-bot` still runs and writes results, but does not notify anyone. Example placeholders are treated as unconfigured; `install.sh` does not create a webhook config.
 
 The webhook receives JSON like:
 
@@ -50,13 +70,13 @@ The webhook receives JSON like:
 
 ## Usage
 
-Open a pane in herdr and run:
+With the plugin installed the bridge starts on its own. Otherwise open a pane in herdr and run:
 
 ```bash
 grok-bot
 ```
 
-It must run inside herdr (`HERDR_ENV=1`); new tabs are created in that pane's workspace. Then drop a task:
+It needs a running herdr server. New agent tabs open in the task's `workspace=` (id or label) if given, else the workspace of the pane it runs in, else the focused workspace. Then drop a task:
 
 ```bash
 cp examples/hello.task ~/.grok-bot/inbox/hello.task
@@ -74,6 +94,7 @@ agent=<name> kind=<kind> cwd=<project path>
 - `agent` (required): herdr agent name; also the tab label. If an agent with this name already exists, it is reused.
 - `kind`: required only when the agent does not exist yet.
 - `cwd`: working directory for a new tab (`~` is expanded; defaults to `$HOME`).
+- `workspace`: workspace ID or single-word label for a new tab. An unknown workspace fails the task; use an ID for labels containing spaces. Header values are separated by whitespace.
 - Prompt: optional. If empty, the agent is just started.
 
 The outbox file contains the agent status (`.result.agent.agent_status`, e.g. `done`, `blocked`, `working`) and the last 200 lines of the agent's screen.
@@ -93,10 +114,15 @@ From `herdr agent start --help`:
 ## Limitations
 
 - Polls the inbox every 3 seconds; tasks run in parallel, one background job each.
+- On restart, interrupted `.running` tasks move to `failed/` without replaying prompts that may already have been sent.
 - No auth / sandboxing of task files: anything that can write to the inbox can prompt your agents.
 - Interactive prompts (trust, login, billing dialogs) are not answered automatically; the agent shows up as `blocked` or times out.
 - Prompt wait timeout is 1 hour; agent start timeout is 2 minutes.
 - macOS/Linux only; tested with herdr 0.9.
+
+## Checks
+
+Run `python3 tests/regression.py` for isolated regressions (Python 3, `bash`, `jq`, and `trash` required). These use synthetic config and mocked herdr/webhook calls. GNU `stat` is exercised via `gstat` when available, or the system `stat` on Linux.
 
 ## License
 
