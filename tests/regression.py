@@ -142,8 +142,34 @@ sleep(){
 }
 ''', rounds=2, expected=1)
 
+    def test_configure_preserves_headers_and_arrow_keys(self):
+        self.run_shell(f'''
+export HERDR_PLUGIN_CONFIG_DIR="$HUB/config"
+mkdir -p "$HERDR_PLUGIN_CONFIG_DIR"
+printf 'GROK_WEBHOOK_HEADER=X-Test\\nGROK_WEBHOOK_PREFIX=""\\n' > "$HUB/webhook.env"
+curl(){{ printf '%s\\n' "$@" > "$GROK_BOT_HUB/request"; }}
+export -f curl
+printf 'nhttps://test.local/\\033[Ahook\\nsynthetic-key\\nyz' | GROK_BOT_HUB="$HUB" bash {str(ROOT / 'plugin/configure.sh')!r} > "$HUB/setup.log" || exit 1
+. "$HERDR_PLUGIN_CONFIG_DIR/webhook.env"
+[ "$GROK_WEBHOOK_URL" = https://test.local/hook ] || exit 2
+[ "$GROK_WEBHOOK_HEADER" = X-Test ] || exit 3
+[ "$GROK_WEBHOOK_PREFIX" = "" ] || exit 4
+grep -qx 'X-Test: synthetic-key' "$HUB/request"
+''')
 
+    def test_configure_defaults(self):
+        self.run_shell(f'''
+printf 'nhttps://test.local/hook\\nsynthetic-key\\nnz' | HERDR_PLUGIN_CONFIG_DIR="$HUB/config" GROK_BOT_HUB="$HUB" bash {str(ROOT / 'plugin/configure.sh')!r} > "$HUB/setup.log" || exit 1
+. "$HUB/config/webhook.env"
+[ "$GROK_WEBHOOK_KEY" = synthetic-key ]
+''')
 
+    def test_configure_escape_preserves_config(self):
+        self.run_shell(f'''
+printf 'GROK_WEBHOOK_URL=https://test.local/original\\n' > "$HUB/webhook.env"
+printf 'nnew-url\\033' | HERDR_PLUGIN_CONFIG_DIR="$HUB" bash {str(ROOT / 'plugin/configure.sh')!r} > "$HUB/setup.log" || exit 1
+grep -qx 'GROK_WEBHOOK_URL=https://test.local/original' "$HUB/webhook.env"
+''')
 
     def test_unknown_workspace(self):
         self.run_shell('''

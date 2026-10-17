@@ -13,17 +13,29 @@ ESC=$'\e'
 
 bye() { echo; echo "Closed, nothing changed."; exit 0; }
 
+# Bash 3.2 (macOS) only accepts an integer read timeout.
+escape_key() {
+  local c=""
+  IFS= read -r -s -n 1 -t 1 c || bye
+  case "$c" in '['|O)
+    while IFS= read -r -s -n 1 -t 1 c; do
+      [[ "$c" == [@-~] ]] && break
+    done ;;
+  esac
+  return 0
+}
+
 # read_input VAR PROMPT [hidden]: line input; Esc closes the popup.
 read_input() {
   local __var=$1 prompt=$2 hidden=${3:-} buf="" c
   printf '%s' "$prompt"
   while IFS= read -r -s -n 1 c; do
     case "$c" in
-      "$ESC") bye ;;
+      "$ESC") escape_key ;;
       "") echo; break ;;                       # Enter
       $'\x7f'|$'\b')                            # Backspace
-        if [ -n "$buf" ]; then buf=${buf%?}; [ -z "$hidden" ] && printf '\b \b'; fi ;;
-      *) buf+=$c; [ -z "$hidden" ] && printf '%s' "$c" ;;
+        if [ -n "$buf" ]; then buf=${buf%?}; if [ -z "$hidden" ]; then printf '\b \b'; fi; fi ;;
+      *) buf+=$c; if [ -z "$hidden" ]; then printf '%s' "$c"; fi ;;
     esac
   done
   printf -v "$__var" '%s' "$buf"
@@ -31,10 +43,10 @@ read_input() {
 
 # read_key VAR PROMPT: single key; Esc closes the popup.
 read_key() {
-  local __var=$1 prompt=$2 c
+  local __var=$1 prompt=$2 c=""
   printf '%s' "$prompt"
   IFS= read -r -s -n 1 c || true
-  [ "$c" = "$ESC" ] && bye
+  if [ "$c" = "$ESC" ]; then escape_key; c=""; fi
   echo "$c"
   printf -v "$__var" '%s' "$c"
 }
@@ -64,14 +76,28 @@ echo
 read_input url "Webhook URL: "
 [ -n "$url" ] || bye
 read_input key "Webhook key (hidden): " hidden
+# Keep the optional header settings from the same config the bridge would use.
+for existing in "$F" "${GROK_BOT_HUB:-$HOME/.grok-bot}/webhook.env"; do
+  if [ -f "$existing" ]; then
+    # shellcheck disable=SC1090
+    . "$existing"
+    break
+  fi
+done
 umask 077
-printf 'GROK_WEBHOOK_URL=%q\nGROK_WEBHOOK_KEY=%q\n' "$url" "$key" > "$F"
+{
+  printf 'GROK_WEBHOOK_URL=%q\nGROK_WEBHOOK_KEY=%q\n' "$url" "$key"
+  if [ "${GROK_WEBHOOK_HEADER+x}" = x ]; then printf 'GROK_WEBHOOK_HEADER=%q\n' "$GROK_WEBHOOK_HEADER"; fi
+  if [ "${GROK_WEBHOOK_PREFIX+x}" = x ]; then printf 'GROK_WEBHOOK_PREFIX=%q\n' "$GROK_WEBHOOK_PREFIX"; fi
+} > "$F"
 chmod 600 "$F"
 echo "Saved to $F"
 read_key a "Send a test ping to Grok Bot now? [y/N] "
 if [[ "$a" =~ ^[Yy] ]]; then
+  headers=()
+  [ -z "$key" ] || headers=(-H "${GROK_WEBHOOK_HEADER:-Authorization}: ${GROK_WEBHOOK_PREFIX-Bearer }$key")
   if curl -fsS -m 20 -X POST "$url" -H "Content-Type: application/json" \
-       ${key:+-H "Authorization: Bearer $key"} \
+       ${headers[@]+"${headers[@]}"} \
        -d '{"source":"grok-bot","id":"setup-test","agent":"","state":"test","file":""}' >/dev/null; then
     echo "Test ping sent."
   else echo "Test ping failed: check the URL and key."; fi
