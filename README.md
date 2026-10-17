@@ -60,7 +60,7 @@ A popup asks for the URL and key (the key is hidden while typing), saves them to
 
 Without herdr, run `bash plugin/configure.sh`, or write `~/.grok-bot/webhook.env` yourself (see `webhook.env.example`). `grok-bot` reads the plugin config dir first, then `~/.grok-bot/webhook.env`. Optional `GROK_WEBHOOK_HEADER` (default `Authorization`) and `GROK_WEBHOOK_PREFIX` (default `Bearer `) change how the key is sent.
 
-Never commit `webhook.env`. Without a URL, `grok-bot` still runs and writes results, but does not notify anyone.
+Never commit `webhook.env`. Without a URL, `grok-bot` still runs and writes results, but does not notify anyone. Example placeholders are treated as unconfigured; `install.sh` does not create a webhook config.
 
 The webhook receives JSON like:
 
@@ -94,6 +94,7 @@ agent=<name> kind=<kind> cwd=<project path>
 - `agent` (required): herdr agent name; also the tab label. If an agent with this name already exists, it is reused.
 - `kind`: required only when the agent does not exist yet.
 - `cwd`: working directory for a new tab (`~` is expanded; defaults to `$HOME`).
+- `workspace`: workspace ID or single-word label for a new tab. An unknown workspace fails the task; use an ID for labels containing spaces. Header values are separated by whitespace.
 - Prompt: optional. If empty, the agent is just started.
 
 The outbox file contains the agent status (`.result.agent.agent_status`, e.g. `done`, `blocked`, `working`) and the last 200 lines of the agent's screen.
@@ -113,10 +114,15 @@ From `herdr agent start --help`:
 ## Limitations
 
 - Polls the inbox every 3 seconds; tasks run in parallel, one background job each.
+- On restart, interrupted `.running` tasks move to `failed/` without replaying prompts that may already have been sent.
 - No auth / sandboxing of task files: anything that can write to the inbox can prompt your agents.
 - Interactive prompts (trust, login, billing dialogs) are not answered automatically; the agent shows up as `blocked` or times out.
 - Prompt wait timeout is 1 hour; agent start timeout is 2 minutes.
 - macOS/Linux only; tested with herdr 0.9.
+
+## Checks
+
+Run `python3 tests/regression.py` for isolated regressions (Python 3, `bash`, `jq`, and `trash` required). These use synthetic config and mocked herdr/webhook calls. GNU `stat` is exercised via `gstat` when available, or the system `stat` on Linux.
 
 ## License
 

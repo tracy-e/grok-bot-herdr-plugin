@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install grok-bot: create hub dirs, link bin/grok-bot into ~/.local/bin, seed webhook.env.
+# Install grok-bot: create hub dirs and link bin/grok-bot into ~/.local/bin.
 set -eu
 REPO="$(cd "$(dirname "$0")" && pwd)"
 HUB="${GROK_BOT_HUB:-$HOME/.grok-bot}"
@@ -12,8 +12,7 @@ if [ -e "$TARGET" ] && [ ! -L "$TARGET" ]; then
 fi
 ln -sfn "$REPO/bin/grok-bot" "$TARGET"; echo "Linked $TARGET -> $REPO/bin/grok-bot"
 if [ ! -f "$HUB/webhook.env" ]; then
-  cp "$REPO/webhook.env.example" "$HUB/webhook.env"; chmod 600 "$HUB/webhook.env"
-  echo "Created $HUB/webhook.env - fill in your webhook URL and key"
+  echo "No webhook configured - run bash $REPO/plugin/configure.sh"
 else
   echo "Keeping existing $HUB/webhook.env"
 fi
